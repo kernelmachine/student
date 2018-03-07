@@ -188,11 +188,14 @@ def main():
 
     init_bg = get_init_bg(train_X)
     init_beta = None
+    update_beta = True
     if no_bg:
         if n_topics == 1:
             init_beta = init_bg.copy()
             init_beta = init_beta.reshape([1, len(vocab)])
+            update_beta = False
         init_bg = np.zeros_like(init_bg)
+
 
     network_architecture = make_network(dv, encoder_layers, embedding_dim,
                                         n_topics, encoder_shortcuts, label_type, n_labels, label_emb_dim,
@@ -226,7 +229,7 @@ def main():
 
     tf.reset_default_graph()
 
-    model = Student(network_architecture, alpha=alpha, learning_rate=learning_rate, batch_size=batch_size, init_embeddings=embeddings, update_embeddings=update_embeddings, init_bg=init_bg, update_background=update_background, init_beta=init_beta, threads=threads, regularize=auto_regularize, optimizer=optimizer, adam_beta1=adam_beta1, seed=seed)
+    model = Student(network_architecture, alpha=alpha, learning_rate=learning_rate, batch_size=batch_size, init_embeddings=embeddings, update_embeddings=update_embeddings, init_bg=init_bg, update_background=update_background, init_beta=init_beta, update_beta=update_beta, threads=threads, regularize=auto_regularize, optimizer=optimizer, adam_beta1=adam_beta1, seed=seed)
 
     # train full model
     print("Optimizing full model")
