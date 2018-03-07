@@ -285,6 +285,7 @@ def process_subset(items, parsed, label_name, label_list, vocab, metadata_keys, 
     dat_strings = []
     dat_labels = []
     mallet_strings = []
+    fast_text_lines = []
 
     counter = Counter()
     word_counter = Counter()

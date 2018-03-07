@@ -17,7 +17,7 @@ class Student(object):
 
     def __init__(self, network_architecture, alpha=1.0,
                  learning_rate=0.001, batch_size=100, init_embeddings=None, update_embeddings=True,
-                 init_bg=None, update_background=True, update_beta=True,
+                 init_bg=None, update_background=True, init_beta=None, update_beta=True,
                  threads=4, regularize=False, optimizer='adam',
                  adam_beta1=0.99, seed=None):
 
@@ -117,6 +117,9 @@ class Student(object):
         # initialize background
         if init_bg is not None:
             self.sess.run(self.network_weights['background'].assign(init_bg))
+
+        if init_beta is not None:
+            self.sess.run(self.network_weights['beta'].assign(init_beta))
 
         # initialize word embeddings
         if init_embeddings is not None:
