@@ -191,7 +191,7 @@ def main():
     if no_bg:
         if n_topics == 1:
             init_beta = init_bg.copy()
-            init_beta.reshape([1, len(vocab)])
+            init_beta = init_beta.reshape([1, len(vocab)])
         init_bg = np.zeros_like(init_bg)
 
     network_architecture = make_network(dv, encoder_layers, embedding_dim,
