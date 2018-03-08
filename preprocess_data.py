@@ -104,6 +104,9 @@ def preprocess_data(train_infile, test_infile, output_dir, train_prefix, test_pr
     elif stopwords == 'snowball':
         print("Using snowball stopwords")
         stopword_list = fh.read_text(os.path.join('stopwords', 'snowball_stopwords.txt'))
+    elif stopwords is not None:
+        print("Using custom stopwords")
+        stopword_list = fh.read_text(os.path.join('stopwords', stopwords + '_stopwords.txt'))
     else:
         stopword_list = []
     stopword_set = {s.strip() for s in stopword_list}
