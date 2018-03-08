@@ -50,7 +50,7 @@ def main():
                       help='Apply adaptive regularization for sparsity in topics: default=%default')
     parser.add_option('-t', dest='test_prefix', default=None,
                       help='Prefix of test set: default=%default')
-    parser.add_option('--o', dest='output_dir', default='output',
+    parser.add_option('-o', dest='output_dir', default='output',
                       help='Output directory: default=%default')
     parser.add_option('--w2v', dest='word2vec_file', default=None,
                       help='Use this word2vec .bin file to initialize and fix embeddings: default=%default')
