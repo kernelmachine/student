@@ -54,6 +54,8 @@ def main():
                       help='Output directory: default=%default')
     parser.add_option('--w2v', dest='word2vec_file', default=None,
                       help='Use this word2vec .bin file to initialize and fix embeddings: default=%default')
+    parser.add_option('--vocab_size', dest='vocab_size', default=None,
+                      help='Filter the vocabulary keeping the most common n words: default=%default')
     parser.add_option('--update_bg', action="store_true", dest="update_bg", default=False,
                       help='Update background parameters: default=%default')
     parser.add_option('--no_bg', action="store_true", dest="no_bg", default=False,
@@ -96,6 +98,7 @@ def main():
     test_prefix = options.test_prefix
     output_dir = options.output_dir
     word2vec_file = options.word2vec_file
+    vocab_size = options.vocab_size
     update_background = options.update_bg
     no_bg = options.no_bg
     bn_anneal = not options.no_bn_anneal
@@ -110,7 +113,7 @@ def main():
     else:
         rng = np.random.RandomState(np.random.randint(0, 100000))
 
-    train_X, vocab, train_labels, label_names, label_type, train_covariates, covariate_names, covariates_type = load_data(input_dir, train_prefix, label_file_name, covar_file_names)
+    train_X, vocab, train_labels, label_names, label_type, train_covariates, covariate_names, covariates_type, col_sel = load_data(input_dir, train_prefix, label_file_name, covar_file_names, vocab_size=vocab_size)
     n_train, dv = train_X.shape
 
     if train_labels is not None:
@@ -165,7 +168,7 @@ def main():
         n_dev = 0
 
     if test_prefix is not None:
-        test_X, _, test_labels, _, _, test_covariates, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab)
+        test_X, _, test_labels, _, _, test_covariates, _, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
         n_test, _ = test_X.shape
         if test_labels is not None:
             _, n_labels_test = test_labels.shape
@@ -357,12 +360,32 @@ def main():
         np.savez(os.path.join(output_dir, 'test.theta.npz'), theta=theta)
 
 
-def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=None, vocab=None):
+def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=None, vocab_size=None, vocab=None, col_sel=None):
     print("Loading data")
     temp = fh.load_sparse(os.path.join(input_dir, input_prefix + '.npz')).todense()
-    X = np.array(temp, dtype='float32')
+    n_items, temp_size = temp.shape
+    print("Loaded %d documents with %d features" % (n_items, temp_size))
+
     if vocab is None:
+        col_sel = None
         vocab = fh.read_json(os.path.join(input_dir, input_prefix + '.vocab.json'))
+        # filter vocabulary by word frequency
+        if vocab_size is not None:
+            print("Filtering vocabulary to the most common %d terms" % int(vocab_size))
+            col_sums = np.array(temp.sum(axis=0)).reshape((len(vocab), ))
+            order = list(np.argsort(col_sums))
+            order.reverse()
+            col_sel = np.array(np.zeros(len(vocab)), dtype=bool)
+            for i in range(int(vocab_size)):
+                col_sel[order[i]] = True
+            temp = temp[:, col_sel]
+            vocab = [word for i, word in enumerate(vocab) if col_sel[i]]
+
+    elif col_sel is not None:
+        print("Using given vocabulary")
+        temp = temp[:, col_sel]
+
+    X = np.array(temp, dtype='float32')
     n_items, vocab_size = X.shape
     assert vocab_size == len(vocab)
     print("Loaded %d documents with %d features" % (n_items, vocab_size))
@@ -442,7 +465,7 @@ def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=No
     order.reverse()
     print("Most common words: ", ' '.join([vocab[i] for i in order[:10]]))
 
-    return X, vocab, labels, label_names, label_type, covariates, covariate_names, covariates_type
+    return X, vocab, labels, label_names, label_type, covariates, covariate_names, covariates_type, col_sel
 
 
 def get_init_bg(data):
