@@ -46,6 +46,8 @@ def main():
                       help='Use covariate interactions in model: default=%default')
     parser.add_option('--c_layers', dest='classifier_layers', default=1,
                       help='Number of layers in (generative) classifier [0|1|2]: default=%default')
+    parser.add_option('--exclude_covars', action="store_true", dest="exclude_coavrs", default=False,
+                      help='Exclude covariates from the classifier: default=%default')
     parser.add_option('-r', action="store_true", dest="regularize", default=False,
                       help='Apply adaptive regularization for sparsity in topics: default=%default')
     parser.add_option('-t', dest='test_prefix', default=None,
@@ -94,6 +96,7 @@ def main():
     covar_emb_dim = int(options.covar_emb_dim)
     min_covar_count = options.min_covar_count
     classifier_layers = int(options.classifier_layers)
+    covars_in_classifier = not options.exclude_covars
     auto_regularize = options.regularize
     test_prefix = options.test_prefix
     output_dir = options.output_dir
@@ -203,7 +206,7 @@ def main():
     network_architecture = make_network(dv, encoder_layers, embedding_dim,
                                         n_topics, encoder_shortcuts, label_type, n_labels, label_emb_dim,
                                         covariates_type, n_covariates, covar_emb_dim, use_covar_interactions,
-                                        classifier_layers)  # make_network()
+                                        classifier_layers, covars_in_classifier)  # make_network()
 
     print("Network architecture:")
     for key, val in network_architecture.items():
@@ -494,7 +497,7 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
             yield X[ixs, :].astype('float32'), None, None
 
 
-def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1):
+def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_classifier=True):
     tf.reset_default_graph()
     network_architecture = \
         dict(encoder_layers=encoder_layers,
@@ -509,7 +512,8 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
              n_covariates=n_covariates,
              covar_emb_dim=covar_emb_dim,
              use_covar_interactions=use_covar_interactions,
-             classifier_layers=classifier_layers
+             classifier_layers=classifier_layers,
+             covars_in_classifier=covars_in_classifier
              )
     return network_architecture
 

@@ -237,7 +237,7 @@ class Student(object):
         self.x_recon_no_bn = tf.nn.softmax(eta)
 
         if n_labels > 0:
-            if n_covariates > 0:
+            if n_covariates > 0 and self.network_architecture['covars_in_classifier']:
                 classifier_input = tf.concat([self.theta, c_emb], axis=1)
             else:
                 classifier_input = self.theta
