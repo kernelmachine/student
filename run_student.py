@@ -46,7 +46,7 @@ def main():
                       help='Use covariate interactions in model: default=%default')
     parser.add_option('--c_layers', dest='classifier_layers', default=1,
                       help='Number of layers in (generative) classifier [0|1|2]: default=%default')
-    parser.add_option('--exclude_covars', action="store_true", dest="exclude_coavrs", default=False,
+    parser.add_option('--exclude_covars', action="store_true", dest="exclude_covars", default=False,
                       help='Exclude covariates from the classifier: default=%default')
     parser.add_option('-r', action="store_true", dest="regularize", default=False,
                       help='Apply adaptive regularization for sparsity in topics: default=%default')
