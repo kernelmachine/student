@@ -262,7 +262,7 @@ def main():
         emb_c = model.get_covar_weights()
         print("Covariate deviations:")
         if covar_emb_dim == 0:
-            maw, sparsity = print_top_words(emb_c, vocab, covariate_names)
+            maw, sparsity = print_top_words(emb_c, vocab, covariate_names, n_top_words=16)
         else:
             maw, sparsity = print_top_words(emb_c, vocab)
         print("sparsity in covariates = %0.4f" % sparsity)
