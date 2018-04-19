@@ -365,7 +365,7 @@ def main():
 
 def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=None, vocab_size=None, vocab=None, col_sel=None):
     print("Loading data")
-    temp = fh.load_sparse(os.path.join(input_dir, input_prefix + '.npz')).todense()
+    temp = fh.load_sparse(os.path.join(input_dir, input_prefix + '.labeled.npz')).todense()
     n_items, temp_size = temp.shape
     print("Loaded %d documents with %d features" % (n_items, temp_size))
 
