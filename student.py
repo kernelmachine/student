@@ -78,7 +78,7 @@ class Student(object):
 
         # create a placeholder for dropout strength
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
-
+        self.labeled = tf.placeholder(tf.int32, [None,], name='labeled')
         # create placeholders to allow injecting a specific value of hidden variables
         self.theta_input = tf.placeholder(tf.float32, [None, n_topics], name='theta_input')
         # set self.use_theta_input to 1 to override sampled theta and generate from self.theta_input
@@ -299,7 +299,7 @@ class Student(object):
 
         if self.network_architecture['n_labels'] > 0:
             # compute a loss on the labels, depending on the label type
-            NL_y = -tf.reduce_sum(self.y * tf.log(self.y_recon+1e-10), 1)  # test
+            NL_y = -tf.reduce_sum(self.labeled * self.y * tf.log(self.y_recon+1e-10), 1)  # test
 
             self.classifier_loss = tf.reduce_mean(NL_y)
 
@@ -344,16 +344,16 @@ class Student(object):
                 print("Using SGD")
                 self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
 
-    def fit(self, X, Y, C, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8):
+    def fit(self, X, Y, C, labeled, l2_strengths, l2_strengths_c, l2_strengths_ci, eta_bn_prop=1.0, kld_weight=1.0, keep_prob=0.8):
         """
         Fit the model to data
         """
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
         if Y is not None:
-            opt, loss, classifier_loss, pred = self.sess.run((self.optimizer, self.loss, self.classifier_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
+            opt, loss, classifier_loss, pred = self.sess.run((self.optimizer, self.loss, self.classifier_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.labeled: labeled, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
         else:
-            opt, loss = self.sess.run((self.optimizer, self.loss), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
+            opt, loss = self.sess.run((self.optimizer, self.loss), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob,  self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
             classifier_loss = 0
             pred = -1
         return loss, classifier_loss, pred
