@@ -52,6 +52,8 @@ def main():
                       help='Apply adaptive regularization for sparsity in topics: default=%default')
     parser.add_option('-t', dest='test_prefix', default=None,
                       help='Prefix of test set: default=%default')
+    parser.add_option('-d', dest='dev_prefix', default=None,
+                      help='Prefix of dev set: default=%default')
     parser.add_option('-o', dest='output_dir', default='output',
                       help='Output directory: default=%default')
     parser.add_option('--w2v', dest='word2vec_file', default=None,
@@ -99,6 +101,7 @@ def main():
     covars_in_classifier = not options.exclude_covars
     auto_regularize = options.regularize
     test_prefix = options.test_prefix
+    dev_prefix = options.dev_prefix
     output_dir = options.output_dir
     word2vec_file = options.word2vec_file
     vocab_size = options.vocab_size
@@ -142,33 +145,27 @@ def main():
     else:
         n_covariates = 0
 
-    if dev_folds > 0:
-        n_dev = int(n_train / dev_folds)
-        indices = np.array(range(n_train), dtype=int)
-        rng.shuffle(indices)
-        if dev_fold < dev_folds - 1:
-            dev_indices = indices[n_dev * dev_fold: n_dev * (dev_fold +1)]
-        else:
-            dev_indices = indices[n_dev * dev_fold:]
-        train_indices = list(set(indices) - set(dev_indices))
-        dev_X = train_X[dev_indices, :]
-        train_X = train_X[train_indices, :]
-        if train_labels is not None:
-            dev_labels = train_labels[dev_indices, :]
-            train_labels = train_labels[train_indices, :]
-        else:
-            dev_labels = None
-        if train_covariates is not None:
-            dev_covariates = train_covariates[dev_indices, :]
-            train_covariates = train_covariates[train_indices, :]
-        else:
-            dev_covariates = None
-        n_train = len(train_indices)
+    if dev_prefix is not None:
+        dev_X, _, dev_labels, _, _, dev_covariates, _, _, _ = load_data(input_dir, dev_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
+        n_dev, _ = dev_X.shape
+        if dev_labels is not None:
+            _, n_labels_dev = dev_labels.shape
+            assert n_labels_dev == n_labels
+            #if binary and n_classes == 2 and not generative:
+            #    test_labels = np.argmax(test_labels, axis=1)
+            #    test_labels = test_labels.reshape((n_test, 1))
+            #    n_classes = 1
+        if dev_covariates is not None:
+            if min_covar_count is not None and int(min_covar_count) > 0:
+                dev_covariates = dev_covariates[:, covariate_selector]
+            _, n_covariates_dev = dev_covariates.shape
+            assert n_covariates_dev == n_covariates
+
     else:
         dev_X = None
+        n_dev = 0
         dev_labels = None
         dev_covariates = None
-        n_dev = 0
 
     if test_prefix is not None:
         test_X, _, test_labels, _, _, test_covariates, _, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
@@ -488,13 +485,13 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
         else:
             ixs = np.random.randint(X.shape[0], size=batch_size)
         if Y is not None and C is not None:
-            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32')
+            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32'), L[ix, :].astype(float32)
         elif Y is not None:
-            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), None
+            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), None, L[ix, :].astype(float32)
         elif C is not None:
-            yield X[ixs, :].astype('float32'), None, C[ixs, :].astype('float32')
+            yield X[ixs, :].astype('float32'), None, C[ixs, :].astype('float32'), None
         else:
-            yield X[ixs, :].astype('float32'), None, None
+            yield X[ixs, :].astype('float32'), None, None, None
 
 
 def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_classifier=True):
@@ -552,9 +549,9 @@ def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=
         # Loop over all batches
         for i in range(total_batch):
             # get a minibatch
-            batch_xs, batch_ys, batch_cs = next(mb_gen)
+            batch_xs, batch_ys, batch_cs, batch_labeled = next(mb_gen)
             # do one update, passing in the data, regularization strengths, and bn
-            loss, cls_loss, pred = model.fit(batch_xs, batch_ys, batch_cs, l2_strengths=l2_strengths, l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci, eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
+            loss, cls_loss, pred = model.fit(batch_xs, batch_ys, batch_cs, batch_labeled, l2_strengths=l2_strengths, l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci, eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
             # compute accuracy on minibatch
             if network_architecture['n_labels'] > 0:
                 accuracy += np.sum(pred == np.argmax(batch_ys, axis=1)) / float(n_train)
