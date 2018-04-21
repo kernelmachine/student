@@ -69,8 +69,10 @@ class Student(object):
         self.x = tf.placeholder(tf.float32, [None, dv], name='input')  # batch size x vocab matrix of word counts
         if n_labels > 0:
             self.y = tf.placeholder(tf.float32, [None, n_labels], name='input_y')
+            self.labeled = tf.placeholder(tf.float32, [None, ], name='labeled')
         else:
             self.y = tf.placeholder(tf.float32, [], name='input_y')
+            self.labeled = tf.placeholder(tf.float32, [], name='labeled')
         if n_covariates > 0:
             self.c = tf.placeholder(tf.float32, [None, n_covariates], name='input_c')
         else:
@@ -78,7 +80,7 @@ class Student(object):
 
         # create a placeholder for dropout strength
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
-        self.labeled = tf.placeholder(tf.int32, [None,], name='labeled')
+        
         # create placeholders to allow injecting a specific value of hidden variables
         self.theta_input = tf.placeholder(tf.float32, [None, n_topics], name='theta_input')
         # set self.use_theta_input to 1 to override sampled theta and generate from self.theta_input
@@ -299,7 +301,7 @@ class Student(object):
 
         if self.network_architecture['n_labels'] > 0:
             # compute a loss on the labels, depending on the label type
-            NL_y = -tf.reduce_sum(self.labeled * self.y * tf.log(self.y_recon+1e-10), 1)  # test
+            NL_y = -tf.reduce_sum(tf.expand_dims(self.labeled, axis=1) * self.y * tf.log(self.y_recon+1e-10), 1)  # test
 
             self.classifier_loss = tf.reduce_mean(NL_y)
 
@@ -353,7 +355,7 @@ class Student(object):
         if Y is not None:
             opt, loss, classifier_loss, pred = self.sess.run((self.optimizer, self.loss, self.classifier_loss, self.pred_y), feed_dict={self.x: X, self.y: Y, self.labeled: labeled, self.c: C, self.keep_prob: .8, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
         else:
-            opt, loss = self.sess.run((self.optimizer, self.loss), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: keep_prob,  self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
+            opt, loss = self.sess.run((self.optimizer, self.loss), feed_dict={self.x: X, self.y: Y, self.labeled: None,  self.c: C, self.keep_prob: keep_prob,  self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.eta_bn_prop: eta_bn_prop, self.kld_weight: kld_weight, self.theta_input: theta_input})
             classifier_loss = 0
             pred = -1
         return loss, classifier_loss, pred
@@ -364,10 +366,10 @@ class Student(object):
         l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
         # input a vector of all zeros in place of the labels that the model has been trained on
         Y = np.zeros((1, self.network_architecture['n_labels'])).astype('float32')
+        labeled = np.array([1]).astype('float32')
         batch_size = self.get_batch_size(X)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-
-        theta, pred = self.sess.run((self.theta, self.y_recon), feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input})
+        theta, pred = self.sess.run((self.theta, self.y_recon), feed_dict={self.x: X, self.y: Y, self.labeled: labeled,  self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: 1, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input})
         return theta, pred
 
     def generate(self, theta, Y, C, bn=False):
@@ -379,14 +381,17 @@ class Student(object):
         l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
         if Y is not None:
             Y = np.expand_dims(Y, axis=0)
+            labeled = np.ones((Y.shape[0])).astype('float32')
+        else:
+            labeled = None
         if C is not None:
             C = np.expand_dims(C, axis=0)
         theta = np.expand_dims(theta, axis=0)
         X = np.zeros([1, self.network_architecture['dv']]).astype('float32')
         if bn:
-            recon_x = self.sess.run(self.x_recon, feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: 1, self.is_training: False, self.theta_input: theta, self.use_theta_input: 1.0, self.bg_scale: 0.0})
+            recon_x = self.sess.run(self.x_recon, feed_dict={self.x: X, self.y: Y, self.labeled: labeled,  self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: 1, self.is_training: False, self.theta_input: theta, self.use_theta_input: 1.0, self.bg_scale: 0.0})
         else:
-            recon_x = self.sess.run(self.x_recon_no_bn, feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: 1, self.is_training: False, self.theta_input: theta, self.use_theta_input: 1.0, self.bg_scale: 0.0})
+            recon_x = self.sess.run(self.x_recon_no_bn, feed_dict={self.x: X, self.y: Y, self.labeled: labeled,  self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: 1, self.is_training: False, self.theta_input: theta, self.use_theta_input: 1.0, self.bg_scale: 0.0})
         return recon_x
 
     def predict_from_topics(self, theta, C):
@@ -396,7 +401,8 @@ class Student(object):
         l2_strengths_ci = np.zeros(self.network_weights['beta_ci'].shape)
         X = np.zeros([1, self.network_architecture['dv']]).astype('float32')
         Y = np.zeros([1, self.network_architecture['n_labels']]).astype('float32')
-        probs = self.sess.run(self.y_recon, feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: 1, self.is_training: False, self.theta_input: theta, self.use_theta_input: 1.0})
+        labeled = np.array([1]).astype('float32')
+        probs = self.sess.run(self.y_recon, feed_dict={self.x: X, self.y: Y, self.c: C,  self.labeled: labeled, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: 1, self.is_training: False, self.theta_input: theta, self.use_theta_input: 1.0})
         return probs
 
     def get_losses(self, X, Y, C, eta_bn_prop=1.0):
@@ -411,10 +417,14 @@ class Student(object):
             X = np.expand_dims(X, axis=0)
         if Y is not None and batch_size == 1:
             Y = np.expand_dims(Y, axis=0)
+        if Y is not None:
+            labeled = np.ones((Y.shape[0])).astype('float32')
+        else:
+            labeled = None
         if C is not None and batch_size == 1:
             C = np.expand_dims(C, axis=0)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
-        losses = self.sess.run(self.losses, feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: batch_size, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
+        losses = self.sess.run(self.losses, feed_dict={self.x: X, self.y: Y, self.labeled: labeled, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.batch_size: batch_size, self.var_scale: 0.0, self.is_training: False, self.theta_input: theta_input, self.eta_bn_prop: eta_bn_prop})
         return losses
 
     def compute_theta(self, X, Y, C):
@@ -428,11 +438,15 @@ class Student(object):
             X = np.expand_dims(X, axis=0)
         if Y is not None and batch_size == 1:
             Y = np.expand_dims(Y, axis=0)
+        if Y is not None:
+            labeled = np.ones((Y.shape[0])).astype('float32')
+        else:
+            labeled = None
         if C is not None and batch_size == 1:
             C = np.expand_dims(C, axis=0)
         theta_input = np.zeros([batch_size, self.network_architecture['n_topics']]).astype('float32')
 
-        theta = self.sess.run(self.theta, feed_dict={self.x: X, self.y: Y, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: batch_size, self.is_training: False, self.theta_input: theta_input})
+        theta = self.sess.run(self.theta, feed_dict={self.x: X, self.y: Y, self.labeled: labeled, self.c: C, self.keep_prob: 1.0, self.l2_strengths: l2_strengths, self.l2_strengths_c: l2_strengths_c, self.l2_strengths_ci: l2_strengths_ci, self.var_scale: 0.0, self.batch_size: batch_size, self.is_training: False, self.theta_input: theta_input})
         return theta
 
     def get_weights(self):
