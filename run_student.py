@@ -119,7 +119,7 @@ def main():
     else:
         rng = np.random.RandomState(np.random.randint(0, 100000))
 
-    train_X, vocab, train_labels, label_names, label_type, train_covariates, covariate_names, covariates_type, col_sel = load_data(input_dir, train_prefix, label_file_name, covar_file_names, vocab_size=vocab_size)
+    train_X, vocab, train_labels, label_names, na_label_index, label_type, train_covariates, covariate_names, covariates_type, col_sel = load_data(input_dir, train_prefix, label_file_name, covar_file_names, vocab_size=vocab_size)
     n_train, dv = train_X.shape
 
     if train_labels is not None:
@@ -146,7 +146,7 @@ def main():
         n_covariates = 0
 
     if dev_prefix is not None:
-        dev_X, _, dev_labels, _, _, dev_covariates, _, _, _ = load_data(input_dir, dev_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
+        dev_X, _, dev_labels, _, _, _, dev_covariates, _, _, _ = load_data(input_dir, dev_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
         n_dev, _ = dev_X.shape
         if dev_labels is not None:
             _, n_labels_dev = dev_labels.shape
@@ -168,7 +168,7 @@ def main():
         dev_covariates = None
 
     if test_prefix is not None:
-        test_X, _, test_labels, _, _, test_covariates, _, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
+        test_X, _, test_labels, _, _, _, test_covariates, _, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
         n_test, _ = test_X.shape
         if test_labels is not None:
             _, n_labels_test = test_labels.shape
@@ -236,7 +236,7 @@ def main():
 
     # train full model
     print("Optimizing full model")
-    model = train(model, network_architecture, train_X, train_labels, train_covariates, regularize=auto_regularize, training_epochs=n_epochs, batch_size=batch_size, rng=rng, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal)
+    model = train(model, network_architecture, train_X, train_labels, train_covariates, na_label_index=na_label_index, regularize=auto_regularize, training_epochs=n_epochs, batch_size=batch_size, rng=rng, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal)
 
     fh.makedirs(output_dir)
 
@@ -350,19 +350,25 @@ def main():
     np.savez(os.path.join(output_dir, 'train.theta.npz'), theta=theta)
 
     if dev_X is not None:
-        dev_Y = np.zeros_like(dev_labels)
+        if dev_labels is None:
+            dev_Y = None
+        else:
+            dev_Y = np.zeros_like(dev_labels)
         theta = model.compute_theta(dev_X, dev_Y, dev_covariates)
         np.savez(os.path.join(output_dir, 'dev.theta.npz'), theta=theta)
 
     if n_test > 0:
-        test_Y = np.zeros_like(test_labels)
+        if test_labels is None:
+            test_Y = None
+        else:
+            test_Y = np.zeros_like(test_labels)
         theta = model.compute_theta(test_X, test_Y, test_covariates)
         np.savez(os.path.join(output_dir, 'test.theta.npz'), theta=theta)
 
 
 def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=None, vocab_size=None, vocab=None, col_sel=None):
     print("Loading data")
-    temp = fh.load_sparse(os.path.join(input_dir, input_prefix + '.labeled.npz')).todense()
+    temp = fh.load_sparse(os.path.join(input_dir, input_prefix + '.npz')).todense()
     n_items, temp_size = temp.shape
     print("Loaded %d documents with %d features" % (n_items, temp_size))
 
@@ -402,6 +408,10 @@ def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=No
             print("Loading labels from", label_file)
             temp = pd.read_csv(label_file, header=0, index_col=0)
             label_names = temp.columns
+            if 'NA' in label_names:
+                na_label_index = list(label_names).index('NA')
+            else:
+                na_label_index = len(label_names) + 1
             labels = np.array(temp.values)
             labels = labels[non_empty_sel, :]
             n, n_labels = labels.shape
@@ -422,6 +432,7 @@ def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=No
         labels = None
         label_names = None
         label_type = None
+        na_label_index = None
 
     if covar_file_names is not None:
         covariate_list = []
@@ -465,7 +476,7 @@ def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=No
     order.reverse()
     print("Most common words: ", ' '.join([vocab[i] for i in order[:10]]))
 
-    return X, vocab, labels, label_names, label_type, covariates, covariate_names, covariates_type, col_sel
+    return X, vocab, labels, label_names, na_label_index, label_type, covariates, covariate_names, covariates_type, col_sel
 
 
 def get_init_bg(data):
@@ -477,7 +488,7 @@ def get_init_bg(data):
     return bg
 
 
-def create_minibatch(X, Y, C, batch_size=200, rng=None):
+def create_minibatch(X, Y, C, na_label_index, batch_size=200, rng=None):
     while True:
         # Return random data samples of a size 'minibatch_size' at each iteration
         if rng is not None:
@@ -485,9 +496,11 @@ def create_minibatch(X, Y, C, batch_size=200, rng=None):
         else:
             ixs = np.random.randint(X.shape[0], size=batch_size)
         if Y is not None and C is not None:
-            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32'), L[ix, :].astype(float32)
+            L = np.argmax(Y, axis=1) != na_label_index
+            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32'), L[ixs].astype('float32')
         elif Y is not None:
-            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), None, L[ix, :].astype(float32)
+            L = np.argmax(Y, axis=1) != na_label_index
+            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), None, L[ixs].astype('float32')
         elif C is not None:
             yield X[ixs, :].astype('float32'), None, C[ixs, :].astype('float32'), None
         else:
@@ -515,10 +528,10 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
     return network_architecture
 
 
-def train(model, network_architecture, X, Y, C, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
+def train(model, network_architecture, X, Y, C, na_label_index=4, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
 
     n_train, dv = X.shape
-    mb_gen = create_minibatch(X, Y, C, batch_size=batch_size, rng=rng)
+    mb_gen = create_minibatch(X, Y, C, na_label_index=na_label_index, batch_size=batch_size, rng=rng)
 
     dv = network_architecture['dv']
     n_topics = network_architecture['n_topics']
