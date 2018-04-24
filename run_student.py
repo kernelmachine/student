@@ -6,10 +6,40 @@ import gensim
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-
+from collections import defaultdict
 import file_handling as fh
 from student import Student
+from tqdm import tqdm
 
+def load_word_vectors_from_file(fname):
+        res = dict(word_vecs={},
+                   vocab_size={},
+                   vector_size={},
+                   index2word={})
+        skipped = 0
+        with open(fname, 'r') as f:
+            header = f.readline()
+            vocab_size, vector_size = tuple(map(int, header.split()))
+            res['vocab_size'] = vocab_size
+            res['vector_size'] = vector_size
+            for i, line in tqdm(enumerate(f), total=vocab_size):
+                line = line.rstrip().split()
+                word, vector = line[0], line[1:]
+                if len(vector) == vector_size:
+                    try:
+                        vector = list(map(float, vector))
+                        res['word_vecs'][word] = vector
+                    except ValueError:
+                        skipped += 1
+                        continue
+                else:
+                    skipped += 1
+                    continue
+            print("Skipped {} words in file.".format(skipped))
+            res['vocab_size'] = len(res['word_vecs'])
+            for i in range(res['vocab_size']):
+                res['index2word'][i] = word
+        return res
 
 def main():
     usage = "%prog input_dir train_prefix"
@@ -52,7 +82,7 @@ def main():
                       help='Apply adaptive regularization for sparsity in topics: default=%default')
     parser.add_option('-t', dest='test_prefix', default=None,
                       help='Prefix of test set: default=%default')
-    parser.add_option('-f', dest='final_evaluate', default=None,
+    parser.add_option('-f', dest='final_evaluate', action="store_true", default=False,
                       help='perform final evaluation on test set')
     parser.add_option('-d', dest='dev_prefix', default=None,
                       help='Prefix of dev set: default=%default')
@@ -223,12 +253,12 @@ def main():
         embeddings = np.array(rng.rand(vocab_size, 300) * 0.25 - 0.5, dtype=np.float32)
         count = 0
         print("Loading word vectors")
-        pretrained = gensim.models.KeyedVectors.load_word2vec_format(word2vec_file, binary=False)
+        pretrained = load_word_vectors_from_file(word2vec_file)
 
         for word, index in vocab_dict.items():
-            if word in pretrained:
+            if pretrained['word_vecs'].get(word) is not None:
                 count += 1
-                embeddings[index, :] = pretrained[word]
+                embeddings[index, :] = pretrained['word_vecs'][word]
 
         print("Found embeddings for %d words" % count)
         update_embeddings = False
@@ -242,7 +272,7 @@ def main():
 
     # train full model
     print("Optimizing full model")
-    model = train(model, network_architecture, train_X, train_labels, train_covariates, is_labeled=is_labeled, regularize=auto_regularize, training_epochs=n_epochs, batch_size=batch_size, rng=rng, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal)
+    model = train(model, network_architecture, train_X, train_labels, train_covariates, w2v=word2vec_file is not None, is_labeled=is_labeled, regularize=auto_regularize, training_epochs=n_epochs, batch_size=batch_size, rng=rng, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal)
 
     fh.makedirs(output_dir)
 
@@ -353,6 +383,7 @@ def main():
                     probs = model.predict_from_topics(Z, C)
                     all_probs[c, k] = probs[0, 0]
             np.savez(os.path.join(output_dir, 'covar_topic_probs.npz'), probs=all_probs)
+
 
     # save document representations
     theta = model.compute_theta(train_X, train_labels, train_covariates)
@@ -497,24 +528,44 @@ def get_init_bg(data):
     bg = np.array(np.log(sums) - np.log(float(np.sum(sums))), dtype=np.float32)
     return bg
 
+def pad_sequence(array, seq_len):
+    z = np.zeros((seq_len,))
+    z[:len(array)] = array
+    return z
 
-def create_minibatch(X, Y, C, is_labeled, batch_size=200, rng=None):
+def get_index_repr(X_batch):
+    rows, cols = np.nonzero(X_batch) 
+    d = defaultdict(list)
+    for x,y in zip(rows, cols):
+        d[x].append(y)
+    pad_length = max([len(val) for key, val in d.items()])
+    X_batch_padded = np.zeros((X_batch.shape[0], pad_length))
+    for i, (key, val) in enumerate(d.items()):
+        X_batch_padded[i, :] = pad_sequence(val, pad_length)
+    return X_batch_padded
+
+def create_minibatch(X, Y, C, is_labeled, w2v=False, batch_size=200, rng=None):
     while True:
         # Return random data samples of a size 'minibatch_size' at each iteration
         if rng is not None:
             ixs = rng.randint(X.shape[0], size=batch_size)
         else:
             ixs = np.random.randint(X.shape[0], size=batch_size)
+        if w2v:
+            X_batch_index = get_index_repr(X[ixs, :])
+        else:
+            X_batch_index = None
+            
         if Y is not None and C is not None:
             L = is_labeled
-            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32'), L[ixs].astype('float32')
+            yield X[ixs, :].astype('float32'), X_batch_index, Y[ixs, :].astype('float32'), C[ixs, :].astype('float32'), L[ixs].astype('float32')
         elif Y is not None:
             L = is_labeled
-            yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), None, L[ixs].astype('float32')
+            yield X[ixs, :].astype('float32'), X_batch_index, Y[ixs, :].astype('float32'), None, L[ixs].astype('float32')
         elif C is not None:
-            yield X[ixs, :].astype('float32'), None, C[ixs, :].astype('float32'), None
+            yield X[ixs, :].astype('float32'), X_batch_index, None, C[ixs, :].astype('float32'), None
         else:
-            yield X[ixs, :].astype('float32'), None, None, None
+            yield X[ixs, :].astype('float32'), X_batch_index, None, None, None
 
 
 def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_shortcut=False, label_type=None, n_labels=0, label_emb_dim=0, covariate_type=None, n_covariates=0, covar_emb_dim=0, use_covar_interactions=False, classifier_layers=1, covars_in_classifier=True):
@@ -538,11 +589,11 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
     return network_architecture
 
 
-def train(model, network_architecture, X, Y, C, is_labeled, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
+def train(model, network_architecture, X, Y, C, is_labeled, w2v=False, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
 
     n_train, dv = X.shape
     n_train = n_train - np.sum(~is_labeled)
-    mb_gen = create_minibatch(X, Y, C, is_labeled, batch_size=batch_size, rng=rng)
+    mb_gen = create_minibatch(X, Y, C, is_labeled, w2v=w2v, batch_size=batch_size, rng=rng)
 
     dv = network_architecture['dv']
     n_topics = network_architecture['n_topics']
@@ -573,9 +624,9 @@ def train(model, network_architecture, X, Y, C, is_labeled, batch_size=200, trai
         # Loop over all batches
         for i in range(total_batch):
             # get a minibatch
-            batch_xs, batch_ys, batch_cs, batch_labeled = next(mb_gen)
+            batch_xs, batch_xs_idx, batch_ys, batch_cs, batch_labeled = next(mb_gen)
             # do one update, passing in the data, regularization strengths, and bn
-            loss, cls_loss, pred = model.fit(batch_xs, batch_ys, batch_cs, batch_labeled, l2_strengths=l2_strengths, l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci, eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
+            loss, cls_loss, pred = model.fit(batch_xs, batch_xs_idx, batch_ys, batch_cs, batch_labeled, l2_strengths=l2_strengths, l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci, eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
             # compute accuracy on minibatch
             if network_architecture['n_labels'] > 0:
                 pred = pred[batch_labeled.astype(bool)]
@@ -761,7 +812,8 @@ def evaluate_perplexity(model, X, Y, C, eta_bn_prop=1.0):
         Y = Y.astype('float32')
     if C is not None:
         C = C.astype('float32')
-    losses = model.get_losses(X, Y, C, eta_bn_prop=eta_bn_prop)
+    X_idx = get_index_repr(X)
+    losses = model.get_losses(X, X_idx, Y, C, eta_bn_prop=eta_bn_prop)
     perplexity = np.exp(np.mean(losses / doc_sums))
 
     return perplexity
