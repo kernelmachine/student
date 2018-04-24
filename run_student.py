@@ -52,6 +52,8 @@ def main():
                       help='Apply adaptive regularization for sparsity in topics: default=%default')
     parser.add_option('-t', dest='test_prefix', default=None,
                       help='Prefix of test set: default=%default')
+    parser.add_option('-f', dest='final_evaluate', default=None,
+                      help='perform final evaluation on test set')
     parser.add_option('-d', dest='dev_prefix', default=None,
                       help='Prefix of dev set: default=%default')
     parser.add_option('-o', dest='output_dir', default='output',
@@ -109,6 +111,7 @@ def main():
     no_bg = options.no_bg
     bn_anneal = not options.no_bn_anneal
     dev_folds = int(options.dev_folds)
+    final_evaluate = options.final_evaluate
     dev_fold = int(options.dev_fold)
     optimizer = options.optimizer
     seed = options.seed
@@ -168,26 +171,29 @@ def main():
         dev_covariates = None
 
     if test_prefix is not None:
-        test_X, _, test_labels, _, _, _, test_covariates, _, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
-        n_test, _ = test_X.shape
-        if test_labels is not None:
-            _, n_labels_test = test_labels.shape
-            assert n_labels_test == n_labels
-            #if binary and n_classes == 2 and not generative:
-            #    test_labels = np.argmax(test_labels, axis=1)
-            #    test_labels = test_labels.reshape((n_test, 1))
-            #    n_classes = 1
-        if test_covariates is not None:
-            if min_covar_count is not None and int(min_covar_count) > 0:
-                test_covariates = test_covariates[:, covariate_selector]
-            _, n_covariates_test = test_covariates.shape
-            assert n_covariates_test == n_covariates
+        if final_evaluate:
+            test_X, _, test_labels, _, _, _, test_covariates, _, _, _ = load_data(input_dir, test_prefix, label_file_name, covar_file_names, vocab=vocab, col_sel=col_sel)
+            n_test, _ = test_X.shape
+            if test_labels is not None:
+                _, n_labels_test = test_labels.shape
+                assert n_labels_test == n_labels
+                #if binary and n_classes == 2 and not generative:
+                #    test_labels = np.argmax(test_labels, axis=1)
+                #    test_labels = test_labels.reshape((n_test, 1))
+                #    n_classes = 1
+            if test_covariates is not None:
+                if min_covar_count is not None and int(min_covar_count) > 0:
+                    test_covariates = test_covariates[:, covariate_selector]
+                _, n_covariates_test = test_covariates.shape
+                assert n_covariates_test == n_covariates
 
-    else:
-        test_X = None
-        n_test = 0
-        test_labels = None
-        test_covariates = None
+        else:
+            test_X = None
+            n_test = 0
+            test_labels = None
+            test_covariates = None
+
+    is_labeled = pd.read_csv(os.path.join(input_dir, "train.is_labeled.csv"), names=['labeled']).labeled
 
     init_bg = get_init_bg(train_X)
     init_beta = None
@@ -217,7 +223,7 @@ def main():
         embeddings = np.array(rng.rand(vocab_size, 300) * 0.25 - 0.5, dtype=np.float32)
         count = 0
         print("Loading word vectors")
-        pretrained = gensim.models.KeyedVectors.load_word2vec_format(word2vec_file, binary=True)
+        pretrained = gensim.models.KeyedVectors.load_word2vec_format(word2vec_file, binary=False)
 
         for word, index in vocab_dict.items():
             if word in pretrained:
@@ -236,7 +242,7 @@ def main():
 
     # train full model
     print("Optimizing full model")
-    model = train(model, network_architecture, train_X, train_labels, train_covariates, na_label_index=na_label_index, regularize=auto_regularize, training_epochs=n_epochs, batch_size=batch_size, rng=rng, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal)
+    model = train(model, network_architecture, train_X, train_labels, train_covariates, is_labeled=is_labeled, regularize=auto_regularize, training_epochs=n_epochs, batch_size=batch_size, rng=rng, X_dev=dev_X, Y_dev=dev_labels, C_dev=dev_covariates, bn_anneal=bn_anneal)
 
     fh.makedirs(output_dir)
 
@@ -285,9 +291,10 @@ def main():
         fh.write_list_to_text([str(perplexity)], os.path.join(output_dir, 'perplexity.dev.txt'))
 
     if test_X is not None:
-        perplexity = evaluate_perplexity(model, test_X, test_labels, test_covariates, eta_bn_prop=0.0)
-        print("Test perplexity = %0.4f" % perplexity)
-        fh.write_list_to_text([str(perplexity)], os.path.join(output_dir, 'perplexity.test.txt'))
+        if final_evaluate:
+            perplexity = evaluate_perplexity(model, test_X, test_labels, test_covariates, eta_bn_prop=0.0)
+            print("Test perplexity = %0.4f" % perplexity)
+            fh.write_list_to_text([str(perplexity)], os.path.join(output_dir, 'perplexity.test.txt'))
 
     if n_covariates > 0 and covariates_type == 'categorical':
         print("Predicting categorical covariates")
@@ -301,9 +308,10 @@ def main():
             print("Dev accuracy on covariates = %0.4f" % accuracy)
 
         if test_X is not None:
-            predictions = infer_categorical_covariate(model, network_architecture, test_X, test_labels)
-            accuracy = float(np.sum(predictions == np.argmax(test_covariates, axis=1)) / float(len(test_covariates)))
-            print("Test accuracy on covariates = %0.4f" % accuracy)
+            if final_evaluate:
+                predictions = infer_categorical_covariate(model, network_architecture, test_X, test_labels)
+                accuracy = float(np.sum(predictions == np.argmax(test_covariates, axis=1)) / float(len(test_covariates)))
+                print("Test accuracy on covariates = %0.4f" % accuracy)
 
     if n_labels > 0:
         print("Predicting labels")
@@ -313,7 +321,8 @@ def main():
             predict_labels_and_evaluate(model, network_architecture, dev_X, dev_labels, dev_covariates, output_dir, subset='dev')
 
         if test_X is not None:
-            predict_labels_and_evaluate(model, network_architecture, test_X, test_labels, test_covariates, output_dir, subset='test')
+            if final_evaluate:
+                predict_labels_and_evaluate(model, network_architecture, test_X, test_labels, test_covariates, output_dir, subset='test')
 
     # Print associations between topics and labels
     if n_labels > 0 and n_labels < 7:
@@ -358,12 +367,13 @@ def main():
         np.savez(os.path.join(output_dir, 'dev.theta.npz'), theta=theta)
 
     if n_test > 0:
-        if test_labels is None:
-            test_Y = None
-        else:
-            test_Y = np.zeros_like(test_labels)
-        theta = model.compute_theta(test_X, test_Y, test_covariates)
-        np.savez(os.path.join(output_dir, 'test.theta.npz'), theta=theta)
+        if final_evaluate:
+            if test_labels is None:
+                test_Y = None
+            else:
+                test_Y = np.zeros_like(test_labels)
+            theta = model.compute_theta(test_X, test_Y, test_covariates)
+            np.savez(os.path.join(output_dir, 'test.theta.npz'), theta=theta)
 
 
 def load_data(input_dir, input_prefix, label_file_name=None, covar_file_names=None, vocab_size=None, vocab=None, col_sel=None):
@@ -488,7 +498,7 @@ def get_init_bg(data):
     return bg
 
 
-def create_minibatch(X, Y, C, na_label_index, batch_size=200, rng=None):
+def create_minibatch(X, Y, C, is_labeled, batch_size=200, rng=None):
     while True:
         # Return random data samples of a size 'minibatch_size' at each iteration
         if rng is not None:
@@ -496,10 +506,10 @@ def create_minibatch(X, Y, C, na_label_index, batch_size=200, rng=None):
         else:
             ixs = np.random.randint(X.shape[0], size=batch_size)
         if Y is not None and C is not None:
-            L = np.argmax(Y, axis=1) != na_label_index
+            L = is_labeled
             yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), C[ixs, :].astype('float32'), L[ixs].astype('float32')
         elif Y is not None:
-            L = np.argmax(Y, axis=1) != na_label_index
+            L = is_labeled
             yield X[ixs, :].astype('float32'), Y[ixs, :].astype('float32'), None, L[ixs].astype('float32')
         elif C is not None:
             yield X[ixs, :].astype('float32'), None, C[ixs, :].astype('float32'), None
@@ -528,10 +538,11 @@ def make_network(dv, encoder_layers=2, embedding_dim=300, n_topics=50, encoder_s
     return network_architecture
 
 
-def train(model, network_architecture, X, Y, C, na_label_index=4, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
+def train(model, network_architecture, X, Y, C, is_labeled, batch_size=200, training_epochs=100, display_step=5, min_weights_sq=1e-7, regularize=False, X_dev=None, Y_dev=None, C_dev=None, bn_anneal=True, init_eta_bn_prop=1.0, rng=None):
 
     n_train, dv = X.shape
-    mb_gen = create_minibatch(X, Y, C, na_label_index=na_label_index, batch_size=batch_size, rng=rng)
+    n_train = n_train - np.sum(~is_labeled)
+    mb_gen = create_minibatch(X, Y, C, is_labeled, batch_size=batch_size, rng=rng)
 
     dv = network_architecture['dv']
     n_topics = network_architecture['n_topics']
@@ -567,6 +578,8 @@ def train(model, network_architecture, X, Y, C, na_label_index=4, batch_size=200
             loss, cls_loss, pred = model.fit(batch_xs, batch_ys, batch_cs, batch_labeled, l2_strengths=l2_strengths, l2_strengths_c=l2_strengths_c, l2_strengths_ci=l2_strengths_ci, eta_bn_prop=eta_bn_prop, kld_weight=kld_weight)
             # compute accuracy on minibatch
             if network_architecture['n_labels'] > 0:
+                pred = pred[batch_labeled.astype(bool)]
+                batch_ys = batch_ys[batch_labeled.astype(bool)]
                 accuracy += np.sum(pred == np.argmax(batch_ys, axis=1)) / float(n_train)
             # Compute average loss
             avg_loss += loss / n_train * batch_size
