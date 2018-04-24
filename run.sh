@@ -8,5 +8,6 @@ tgt_lang=$3
 epochs=$4
 num_topics=$5
 output=$6
+w2v=$7
 
-CUDA_VISIBLE_DEVICES=$gpu python run_student.py $HOME/rcv2_data/$src_lang/ train -d $HOME/rcv2_data/$tgt_lang/dev -k $num_topics -o output/$output -t $HOME/rcv2_data/$tgt_lang/test -e $epochs --labels topics
+CUDA_VISIBLE_DEVICES=$gpu python run_student.py $HOME/rcv2_data/$src_lang/ train -d $HOME/rcv2_data/$tgt_lang/dev -k $num_topics -o output/$output -t $HOME/rcv2_data/$tgt_lang/test -e $epochs --labels topics --w2v $w2v
